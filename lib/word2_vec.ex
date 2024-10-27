@@ -48,5 +48,4 @@ defmodule Word2Vec do
     ln Pr(w | wj: j in N+i) = <v_w, v_wj> - ln sum_w( exp(<v_w, v_wi>) )
 
   """
-
 end
