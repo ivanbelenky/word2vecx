@@ -27,3 +27,4 @@ word2vecx-*.tar
 
 * data folder
 data
+tmp/

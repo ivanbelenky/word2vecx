@@ -44,7 +44,7 @@ unsigned long long next_random = 1;
 void ReadWord(char *word, FILE *fin, char *eof) {
   int a = 0, ch;
   while (1) {
-    ch = fgetc_unlocked(fin);
+    ch = getc_unlocked(fin);
     if (ch == EOF) {
       *eof = 1;
       break;
@@ -289,7 +289,7 @@ void TrainModel() {
     if (word[0] == '\n') {
       //fprintf(fo, "\n");
       // new line written into output file for some reason
-      fputc_unlocked('\n', fo);
+      putc_unlocked('\n', fo);
       continue;
     }
     // it keeps reading words and this count goes up
@@ -326,7 +326,7 @@ void TrainModel() {
     bigram_word[b] = 0;
     bigram_word[MAX_STRING - 1] = 0;
     //END JOIN
-    
+
     i = SearchVocab(bigram_word);
     if (i == -1) oov = 1; else pab = vocab[i].cn;
     if (pa < min_count) oov = 1;
@@ -335,12 +335,12 @@ void TrainModel() {
     next_random = next_random * (unsigned long long)25214903917 + 11;
     //if (next_random & 0x10000) score = 0;
     if (score > threshold) {
-      fputc_unlocked('_', fo);
+      putc_unlocked('_', fo);
       pb = 0;
-    } else fputc_unlocked(' ', fo);
+    } else putc_unlocked(' ', fo);
     a = 0;
     while (word[a]) {
-      fputc_unlocked(word[a], fo);
+      putc_unlocked(word[a], fo);
       a++;
     }
     pa = pb;

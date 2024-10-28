@@ -50,6 +50,8 @@ const int table_size = 1e8;
 int *table;
 
 void InitUnigramTable() {
+  // this function is creating a unigram table that will serve the purpose 
+  // of improving the speed of weighted random picking of values
   int a, i;
   double train_words_pow = 0;
   double d1, power = 0.75;
@@ -71,7 +73,7 @@ void InitUnigramTable() {
 void ReadWord(char *word, FILE *fin, char *eof) {
   int a = 0, ch;
   while (1) {
-    ch = fgetc_unlocked(fin);
+    ch = getc_unlocked(fin);
     if (ch == EOF) {
       *eof = 1;
       break;
