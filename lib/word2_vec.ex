@@ -42,9 +42,63 @@ defmodule Word2Vec do
 
     prod_{i in C} = prod( Pr(w_j: j in N+i | w_i) )
     we transform to a logarithm for numerical stability, but the essence is exactly
-    the same. Maximizing this optimization functino, gives rise to pretty much the same
+    the same. Maximizing this optimization function, gives rise to pretty much the same
     function with a slight difference
 
     ln Pr(w | wj: j in N+i) = <v_w, v_wj> - ln sum_w( exp(<v_w, v_wi>) )
+
+  There is a very nice [paper](https://arxiv.org/pdf/1402.3722) explaining in clearer
+  terms the ideas behind Mikolov and colleagues paper, negative sampling, and the overall
+  optimization algorithm that needs to be used.
   """
+  alias Req
+  alias Nx
+
+  @billion_words_url "https://www.statmt.org/lm-benchmark/1-billion-word-language-modeling-benchmark-r13output.tar.gz"
+  @data_path "./data"
+
+  @spec download_data(
+    save_path :: Path.t() | String.t(),
+    url :: String.t()
+  ) :: Req.Response.t() | nil
+  def download_data(folder_path \\ @data_path, url \\ @billion_words_url) do
+    save_path = folder_path |> Path.expand |> Path.join(Path.basename(url))
+    if !File.exists?(save_path) do
+      Req.get!(url, into: File.stream!(save_path))
+    end
+  end
+
+  @spec normalize_text(text :: String.t()) :: String.t()
+  def normalize_text(text) do
+    text
+    |> String.downcase()
+    |> String.replace(~r/[’′]/u, "'")
+    |> String.replace(~r/''/u, " ")
+    |> String.replace(~r/'/u, " ' ")
+    |> String.replace(~r/[“”]/u, "\"")
+    |> String.replace(~r/"/u, " \" ")
+    |> String.replace(~r/\./u, " . ")
+    |> String.replace(~r/<br \/>/u, " ")
+    |> String.replace(~r/,/u, " , ")
+    |> String.replace(~r/\(/u, " ( ")
+    |> String.replace(~r/\)/u, " ) ")
+    |> String.replace(~r/!/u, " ! ")
+    |> String.replace(~r/\?/u, " ? ")
+    |> String.replace(~r/;/u, " ")
+    |> String.replace(~r/:/u, " ")
+    |> String.replace(~r/-/u, " - ")
+    |> String.replace(~r/=/u, " ")
+    |> String.replace(~r/\*/u, " ")
+    |> String.replace(~r/\|/u, " ")
+    |> String.replace(~r/«/u, " ")
+    |> String.replace(~r/[0-9]/u, " ")
+  end
+
+  @spec system_normalize_text(path :: Path.t()) :: String.t()
+  def system_normalize_text(path) do
+    System.cmd("bash", ["./scripts/normalize_mikotov.sh", path])
+    |> elem(0)
+  end
+
+
 end
