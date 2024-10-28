@@ -100,5 +100,66 @@ defmodule Word2Vec do
     |> elem(0)
   end
 
+  @doc """
+  A vocabulary is nothing more than a map between words and its
+  count. Rigorously the keys of the map form the vocabulary, and the
+  map is the counter of the vocabulary. This function is somewhat slow
+  for big files. Probably there is room for optimizing.
+  """
+  @spec build_vocab(binary()) :: map
+  def build_vocab(text) do
+    words = String.split(text, ~r/[\n\t\s]/, trim: true)
+    vocab = words
+             |> Enum.chunk_every(2, 1, :discard)
+             |> Enum.reduce(%{}, fn [word0, word1], acc ->
+               acc
+               |> Map.update(word0, 1, &(&1 + 1))
+               |> Map.update(word0 <> "_" <> word1, 1, &(&1 + 1))
+             end)
+    vocab
+  end
+
+  @doc """
+  The idea of word2phrase is to generate a new formatted text where
+  words that should go together end up together. Apparently this is a nice
+  legacy way of building up and creating phrases based on digram probabilities
+  """
+  @spec word_to_phrase(
+    text :: String.t(),
+    vocab :: map,
+    min_count :: non_neg_integer(),
+    phrase_threshold :: non_neg_integer()
+  ) :: [String.t()]
+  def word_to_phrase(text, vocab, min_count \\ 5, phrase_threshold \\ 100) do
+    # The idea is  to traverse this words, by chunks of 2. That is
+    # [word_i, word1_i+1]. We start by writing down the elem(words, 0) and start
+    # On each iteration we need to decide if we should write either of
+    # - " " <> word_i+1 or
+    # - "_" <> word_i+1
+    # this depends on the score of the bigram word_i <> "_" <> word_i+1
+    # if word_i+1 is \n --> we add \n
+    # if word_i is \n --> we write word_i+1 unless is another \n
+    words = String.split(text, ~r/[\t\s]/, trim: true)
+    phrases = words
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.map(fn [word0, word1] ->
+      case {word0, word1} do
+        {_, "\n"} -> "\n"
+        {"\n", w1} -> if w1 != "\n", do: w1, else: nil
+        {w0, w1} -> if score(w0, w1, vocab, min_count) > phrase_threshold do
+          "_" <> w1
+        else
+          " " <> w1
+        end
+      end
+    end)
+
+  [Enum.at(words, 0)] ++ phrases
+  end
+
+  def score(word0, word1, vocab, min_count) do
+    0
+  end
+
 
 end

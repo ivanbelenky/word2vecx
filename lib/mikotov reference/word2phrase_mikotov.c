@@ -275,8 +275,10 @@ void TrainModel() {
   FILE *fo, *fin;
   printf("Starting training using file %s\n", train_file);
 
+  // unigram and bigram is now available on 
   LearnVocabFromTrainFile();
 
+  // something is going to be written inside output file
   fin = fopen(train_file, "rb");
   fo = fopen(output_file, "wb");
   word[0] = 0;
@@ -286,21 +288,26 @@ void TrainModel() {
     if (eof) break;
     if (word[0] == '\n') {
       //fprintf(fo, "\n");
+      // new line written into output file for some reason
       fputc_unlocked('\n', fo);
       continue;
     }
-    // this counter counts the 
+    // it keeps reading words and this count goes up
     cn++;
     if ((debug_mode > 1) && (cn % 1000000 == 0)) {
       printf("Words written: %lldM%c", cn / 1000000, 13);
       fflush(stdout);
     }
+    
+    // oov stands for "out of vocabulary"
     oov = 0;
     i = SearchVocab(word);
     if (i == -1) oov = 1; else pb = vocab[i].cn;
     if (li == -1) oov = 1;
     li = i;
-    //sprintf(bigram_word, "%s_%s", last_word, word);
+
+    // sprintf(bigram_word, "%s_%s", last_word, word);
+    // JOIN LAST WORD _ WORD
     a = 0;
     b = 0;
     while (last_word[a]) {
@@ -318,7 +325,8 @@ void TrainModel() {
     }
     bigram_word[b] = 0;
     bigram_word[MAX_STRING - 1] = 0;
-    //
+    //END JOIN
+    
     i = SearchVocab(bigram_word);
     if (i == -1) oov = 1; else pab = vocab[i].cn;
     if (pa < min_count) oov = 1;
