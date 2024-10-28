@@ -14,7 +14,7 @@ defmodule Word2Vec.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger],
     ]
   end
 
@@ -23,7 +23,8 @@ defmodule Word2Vec.MixProject do
     [
       {:axon, "~> 0.6"},
       {:req, "~> 0.5.0"},
-      {:benchee, "~> 1.0", only: :dev}
+      {:benchee, "~> 1.0", only: :dev},
+      {:progress_bar, "> 0.0.0"},
     ]
   end
 end

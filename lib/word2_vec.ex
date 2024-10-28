@@ -56,13 +56,12 @@ defmodule Word2Vec do
 
   @billion_words_url "https://www.statmt.org/lm-benchmark/1-billion-word-language-modeling-benchmark-r13output.tar.gz"
   @data_path "./data"
+  @progress_bar_update_step 10_000
 
-  @spec download_data(
-    save_path :: Path.t() | String.t(),
-    url :: String.t()
-  ) :: Req.Response.t() | nil
+  @spec download_data(Path.t() | String.t(), String.t()) :: Req.Response.t() | nil
   def download_data(folder_path \\ @data_path, url \\ @billion_words_url) do
-    save_path = folder_path |> Path.expand |> Path.join(Path.basename(url))
+    save_path = folder_path |> Path.expand() |> Path.join(Path.basename(url))
+
     if !File.exists?(save_path) do
       Req.get!(url, into: File.stream!(save_path))
     end
@@ -94,7 +93,7 @@ defmodule Word2Vec do
     |> String.replace(~r/[0-9]/u, " ")
   end
 
-  @spec system_normalize_text(path :: Path.t()) :: String.t()
+  @spec system_normalize_text(Path.t()) :: String.t()
   def system_normalize_text(path) do
     System.cmd("bash", ["./scripts/normalize_mikotov.sh", path])
     |> elem(0)
@@ -106,16 +105,24 @@ defmodule Word2Vec do
   map is the counter of the vocabulary. This function is somewhat slow
   for big files. Probably there is room for optimizing.
   """
-  @spec build_vocab(binary()) :: map
-  def build_vocab(text) do
+  @spec build_vocab(binary(), map()) :: map()
+  def build_vocab(text, vocab \\ %{}) do
     words = String.split(text, ~r/[\n\t\s]/, trim: true)
-    vocab = words
-             |> Enum.chunk_every(2, 1, :discard)
-             |> Enum.reduce(%{}, fn [word0, word1], acc ->
-               acc
-               |> Map.update(word0, 1, &(&1 + 1))
-               |> Map.update(word0 <> "_" <> word1, 1, &(&1 + 1))
-             end)
+    word_count = length(words)
+    update_step = @progress_bar_update_step
+
+    vocab =
+      words
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.with_index()
+      |> Enum.reduce(vocab, fn {[word0, word1], index}, acc ->
+        if rem(index, update_step) == 0, do: ProgressBar.render(index, word_count, suffix: :count)
+
+        acc
+        |> Map.update(word0, 1, &(&1 + 1))
+        |> Map.update(word0 <> "_" <> word1, 1, &(&1 + 1))
+      end)
+
     vocab
   end
 
@@ -124,15 +131,10 @@ defmodule Word2Vec do
   words that should go together end up together. Apparently this is a nice
   legacy way of building up and creating phrases based on digram probabilities
   """
-  @spec word_to_phrase(
-    text :: String.t(),
-    vocab :: map,
-    min_count :: non_neg_integer(),
-    phrase_threshold :: non_neg_integer()
-  ) :: [String.t()]
+  @spec word_to_phrase(String.t(), map(), non_neg_integer(), non_neg_integer()) :: [String.t()]
   def word_to_phrase(text, vocab, min_count \\ 5, phrase_threshold \\ 100) do
     # The idea is  to traverse this words, by chunks of 2. That is
-    # [word_i, word1_i+1]. We start by writing down the elem(words, 0) and start
+    # [word_i, word1_i+1].
     # On each iteration we need to decide if we should write either of
     # - " " <> word_i+1 or
     # - "_" <> word_i+1
@@ -140,26 +142,62 @@ defmodule Word2Vec do
     # if word_i+1 is \n --> we add \n
     # if word_i is \n --> we write word_i+1 unless is another \n
     words = String.split(text, ~r/[\t\s]/, trim: true)
-    phrases = words
-    |> Enum.chunk_every(2, 1, :discard)
-    |> Enum.map(fn [word0, word1] ->
-      case {word0, word1} do
-        {_, "\n"} -> "\n"
-        {"\n", w1} -> if w1 != "\n", do: w1, else: nil
-        {w0, w1} -> if score(w0, w1, vocab, min_count) > phrase_threshold do
-          "_" <> w1
-        else
-          " " <> w1
+    # Calculate length only once
+    word_count = length(words)
+    update_step = @progress_bar_update_step
+
+    phrases =
+      for {[word0, word1], index} <- Enum.with_index(Enum.chunk_every(words, 2, 1, :discard)) do
+        if rem(index, update_step) == 0, do: ProgressBar.render(index, word_count, suffix: :count)
+
+        case {word0, word1} do
+          {_, "\n"} ->
+            "\n"
+
+          {"\n", w1} when w1 != "\n" ->
+            w1
+
+          {w0, w1} ->
+            bigram_score = score(w0, w1, vocab, min_count, word_count)
+            if bigram_score > phrase_threshold, do: "_" <> w1, else: " " <> w1
         end
       end
-    end)
 
-  [Enum.at(words, 0)] ++ phrases
+    [Enum.at(words, 0)] ++ phrases
   end
 
-  def score(word0, word1, vocab, min_count) do
-    0
+  @spec score(binary(), binary(), map(), float(), non_neg_integer()) :: float()
+  defp score(word0, word1, vocab, word_count, min_count) do
+    case {Map.get(vocab, word0), Map.get(vocab, word1), Map.get(vocab, word0 <> "_" <> word1)} do
+      {count0, count1, digram_count}
+      when count0 > min_count and count1 > min_count and digram_count != nil ->
+        (digram_count - min_count) / (count0 * count1) * word_count
+
+      _ ->
+        0.0
+    end
   end
 
+  @spec build_phrases(Path.t()) :: list()
+  def build_phrases(data_path) do
+    files = File.ls!(data_path)
 
+    vocab =
+      files
+      |> Enum.reduce(%{}, fn file_name, acc ->
+        text = File.read!(Path.join(@data_path, file_name))
+        text_normalized = normalize_text(text)
+        Word2Vec.build_vocab(text_normalized, acc)
+      end)
+
+    phrases =
+      files
+      |> Enum.map(fn file_name ->
+        text = File.read!(Path.join(@data_path, file_name))
+        word_to_phrase(text, vocab, 6, 50)
+      end)
+      |> List.flatten()
+
+    phrases
+  end
 end
