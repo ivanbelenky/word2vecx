@@ -24,3 +24,6 @@ word2vecx-*.tar
 
 # Temporary files, for example, from tests.
 /tmp/
+
+* data folder
+data
