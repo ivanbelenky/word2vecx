@@ -1,6 +1,5 @@
 # Word2Vec
 
-**TODO: Add description**
 
 ## Benchmarks 
 
@@ -39,7 +38,7 @@ awk_sed                    0.58
 normalize_text_ex         0.122 - 4.71x slower +6.44 s
 ```
 
-## Installation
+<!-- ## Installation
 
 If [available in Hex](https://hex.pm/docs/publish), the package can be installed
 by adding `word2vecx` to your list of dependencies in `mix.exs`:
@@ -55,4 +54,4 @@ end
 Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
 and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
 be found at <https://hexdocs.pm/word2vecx>.
-
+ -->

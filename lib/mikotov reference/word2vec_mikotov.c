@@ -24,9 +24,11 @@
 #define MAX_SENTENCE_LENGTH 1000
 #define MAX_CODE_LENGTH 40
 
-const int vocab_hash_size = 30000000;  // Maximum 30 * 0.7 = 21M words in the vocabulary
+// Maximum 30 * 0.7 = 21M words in the vocabulary
+const int vocab_hash_size = 30000000;  
 
-typedef float real;                    // Precision of float numbers
+// Precision of float numbers
+typedef float real; 
 
 struct vocab_word {
   long long cn;
@@ -36,13 +38,30 @@ struct vocab_word {
 
 char train_file[MAX_STRING], output_file[MAX_STRING];
 char save_vocab_file[MAX_STRING], read_vocab_file[MAX_STRING];
+
 struct vocab_word *vocab;
+
 int binary = 0, cbow = 1, debug_mode = 2, window = 5, min_count = 5, num_threads = 12, min_reduce = 1;
 int *vocab_hash;
+
 long long vocab_max_size = 1000, vocab_size = 0, layer1_size = 100;
 long long train_words = 0, word_count_actual = 0, iter = 5, file_size = 0, classes = 0;
 real alpha = 0.025, starting_alpha, sample = 1e-3;
-real *syn0, *syn1, *syn1neg, *expTable;
+
+// syn0 is a synapses matrix
+// vocabulary size will end up being 500K?
+// shape = [vocab_size * 100]
+real *syn0; 
+// syn1 is a synapses matrix only used if the hierarchical 
+// softmax is used, in the demo run it was not used
+// it has size [vocab_size * 100] as well
+real *syn1; 
+// used for negative sampling and same as above
+real *syn1neg;
+// this is the  good old precalculation of e^x/1+e^x
+real *expTable;
+
+
 clock_t start;
 
 int hs = 0, negative = 5;
@@ -350,6 +369,7 @@ void ReadVocab() {
 }
 
 void InitNet() {
+  // [vocab_size*100], {[vocab_size * 100]}
   long long a, b;
   unsigned long long next_random = 1;
   a = posix_memalign((void **)&syn0, 128, (long long)vocab_size * layer1_size * sizeof(real));
@@ -374,6 +394,7 @@ void InitNet() {
 }
 
 void *TrainModelThread(void *id) {
+  //  -size 500 -window 10 -negative 10 -hs 0 -sample 1e-5
   long long a, b, d, cw, word, last_word, sentence_length = 0, sentence_position = 0;
   long long word_count = 0, last_word_count = 0, sen[MAX_SENTENCE_LENGTH + 1];
   long long l1, l2, c, target, label, local_iter = iter;
@@ -384,8 +405,11 @@ void *TrainModelThread(void *id) {
   real *neu1 = (real *)calloc(layer1_size, sizeof(real));
   real *neu1e = (real *)calloc(layer1_size, sizeof(real));
   FILE *fi = fopen(train_file, "rb");
+  // this is why it is ok to putchars and getchars unsafely from the threads
+  // I guess.
   fseek(fi, file_size / (long long)num_threads * (long long)id, SEEK_SET);
   while (1) {
+    // first run idc
     if (word_count - last_word_count > 10000) {
       word_count_actual += word_count - last_word_count;
       last_word_count = word_count;
@@ -399,14 +423,20 @@ void *TrainModelThread(void *id) {
       alpha = starting_alpha * (1 - word_count_actual / (real)(iter * train_words + 1));
       if (alpha < starting_alpha * 0.0001) alpha = starting_alpha * 0.0001;
     }
+    // nothing read --> 
+    // read a sentence of maximum 1000 characters
     if (sentence_length == 0) {
       while (1) {
+        // reads words in the same manner, remember that the document
+        // used for training also contains digrams. It creates sentences
+        // as arrays of uni/di-grams
         word = ReadWordIndex(fi, &eof);
         if (eof) break;
         if (word == -1) continue;
         word_count++;
         if (word == 0) break;
         // The subsampling randomly discards frequent words while keeping the ranking same
+        // The purpose for this is not apparent. You are tweaking the statistic to some degree
         if (sample > 0) {
           real ran = (sqrt(vocab[word].cn / (sample * train_words)) + 1) * (sample * train_words) / vocab[word].cn;
           next_random = next_random * (unsigned long long)25214903917 + 11;
@@ -430,14 +460,22 @@ void *TrainModelThread(void *id) {
     }
     word = sen[sentence_position];
     if (word == -1) continue;
+    // neu1, and neu1e are going to be the learnt representations
+    // of each word so it is being "erased"
     for (c = 0; c < layer1_size; c++) neu1[c] = 0;
     for (c = 0; c < layer1_size; c++) neu1e[c] = 0;
     next_random = next_random * (unsigned long long)25214903917 + 11;
     b = next_random % window;
+    // b is going to be a value that lives between 0 and window, good old gucci things
+    // -cbow flag is turned on for the demo_run.sh script
     if (cbow) {  //train the cbow architecture
       // in -> hidden
       cw = 0;
+      // window == 10, b = 6
+      //   a = 6; 6 < 15                ; a++
       for (a = b; a < window * 2 + 1 - b; a++) if (a != window) {
+      // from b --> [0, 20 - 2*b]
+      //c = 0                 - 10     + 6 = -4
         c = sentence_position - window + a;
         if (c < 0) continue;
         if (c >= sentence_length) continue;
@@ -494,7 +532,7 @@ void *TrainModelThread(void *id) {
           for (c = 0; c < layer1_size; c++) syn0[c + last_word * layer1_size] += neu1e[c];
         }
       }
-    } else {  //train skip-gram
+    } else {// train skip-gram
       for (a = b; a < window * 2 + 1 - b; a++) if (a != window) {
         c = sentence_position - window + a;
         if (c < 0) continue;
@@ -537,7 +575,9 @@ void *TrainModelThread(void *id) {
           if (f > MAX_EXP) g = (label - 1) * alpha;
           else if (f < -MAX_EXP) g = (label - 0) * alpha;
           else g = (label - expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
+          // updates the error vector 
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg[c + l2];
+          // updates the matrix syn1neg with 
           for (c = 0; c < layer1_size; c++) syn1neg[c + l2] += g * syn0[c + l1];
         }
         // Learn weights input -> hidden
