@@ -1,7 +1,8 @@
 # Word2Vec
 
+CBOW implementation of the original work by Mikotov and colleagues.
 
-## Benchmarks 
+## Some Benchmarks 
 
 - Testing the speed for naive elixir implementation of text normalization vs CLI tools, `awk` | `sed`.
 

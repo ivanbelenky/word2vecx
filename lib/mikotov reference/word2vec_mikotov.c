@@ -41,7 +41,9 @@ char save_vocab_file[MAX_STRING], read_vocab_file[MAX_STRING];
 
 struct vocab_word *vocab;
 
-int binary = 0, cbow = 1, debug_mode = 2, window = 5, min_count = 5, num_threads = 12, min_reduce = 1;
+int binary = 0, dry_run = 0, cbow = 1, debug_mode = 2, window = 5, 
+    min_count = 5, num_threads = 12, min_reduce = 1;
+
 int *vocab_hash;
 
 long long vocab_max_size = 1000, vocab_size = 0, layer1_size = 100;
@@ -575,9 +577,9 @@ void *TrainModelThread(void *id) {
           if (f > MAX_EXP) g = (label - 1) * alpha;
           else if (f < -MAX_EXP) g = (label - 0) * alpha;
           else g = (label - expTable[(int)((f + MAX_EXP) * (EXP_TABLE_SIZE / MAX_EXP / 2))]) * alpha;
-          // updates the error vector 
+          // updates the error vector
           for (c = 0; c < layer1_size; c++) neu1e[c] += g * syn1neg[c + l2];
-          // updates the matrix syn1neg with 
+          // updates the matrix syn1neg with
           for (c = 0; c < layer1_size; c++) syn1neg[c + l2] += g * syn0[c + l1];
         }
         // Learn weights input -> hidden
@@ -604,6 +606,10 @@ void TrainModel() {
   starting_alpha = alpha;
   if (read_vocab_file[0] != 0) ReadVocab(); else LearnVocabFromTrainFile();
   if (save_vocab_file[0] != 0) SaveVocab();
+  if (dry_run) {
+    printf("%lld", vocab_size);
+    exit(1);
+  }
   if (output_file[0] == 0) return;
   InitNet();
   if (negative > 0) InitUnigramTable();
@@ -720,6 +726,8 @@ int main(int argc, char **argv) {
     printf("\t\tThe vocabulary will be read from <file>, not constructed from the training data\n");
     printf("\t-cbow <int>\n");
     printf("\t\tUse the continuous bag of words model; default is 1 (use 0 for skip-gram model)\n");
+    printf("\t-dry-run <int>\n");
+    printf("\t\tdo not train\n");
     printf("\nExamples:\n");
     printf("./word2vec -train data.txt -output vec.txt -size 200 -window 5 -sample 1e-4 -negative 5 -hs 0 -binary 0 -cbow 1 -iter 3\n\n");
     return 0;
@@ -735,6 +743,7 @@ int main(int argc, char **argv) {
   if ((i = ArgPos((char *)"-binary", argc, argv)) > 0) binary = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-cbow", argc, argv)) > 0) cbow = atoi(argv[i + 1]);
   if (cbow) alpha = 0.05;
+  if ((i = ArgPos((char *)"-dry-run", argc, argv)) > 0) dry_run = atoi(argv[i + 1]);
   if ((i = ArgPos((char *)"-alpha", argc, argv)) > 0) alpha = atof(argv[i + 1]);
   if ((i = ArgPos((char *)"-output", argc, argv)) > 0) strcpy(output_file, argv[i + 1]);
   if ((i = ArgPos((char *)"-window", argc, argv)) > 0) window = atoi(argv[i + 1]);
