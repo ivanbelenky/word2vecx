@@ -53,6 +53,7 @@ defmodule Word2Vec do
   """
   alias Req
   alias Nx
+  alias Word2Vec.Utils
 
   @billion_words_url "https://www.statmt.org/lm-benchmark/1-billion-word-language-modeling-benchmark-r13output.tar.gz"
   @data_path "./data"
@@ -148,7 +149,10 @@ defmodule Word2Vec do
 
     phrases =
       for {[word0, word1], index} <- Enum.with_index(Enum.chunk_every(words, 2, 1, :discard)) do
-        if rem(index, update_step) == 0, do: ProgressBar.render(index, word_count, suffix: :count)
+        if rem(index, update_step) == 0  do
+          Utils.clear_screen()
+          ProgressBar.render(index, word_count, suffix: :count)
+        end
 
         case {word0, word1} do
           {_, "\n"} ->
@@ -172,7 +176,6 @@ defmodule Word2Vec do
       {count0, count1, digram_count}
       when count0 > min_count and count1 > min_count and digram_count != nil ->
         (digram_count - min_count) / (count0 * count1) * word_count
-
       _ ->
         0.0
     end
