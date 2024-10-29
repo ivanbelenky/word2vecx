@@ -25,6 +25,10 @@ word2vecx-*.tar
 # Temporary files, for example, from tests.
 /tmp/
 
-* data folder
+# data folder
 data
 tmp/
+
+# TODO files
+TODO.md
+
