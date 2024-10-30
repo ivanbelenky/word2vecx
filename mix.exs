@@ -25,6 +25,8 @@ defmodule Word2Vec.MixProject do
       {:req, "~> 0.5.0"},
       {:benchee, "~> 1.0", only: :dev},
       {:progress_bar, "> 0.0.0"},
+      {:torchx, "~> 0.5"},
+      {:dotenv, "~> 3.0.0"}
     ]
   end
 end

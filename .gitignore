@@ -32,3 +32,4 @@ tmp/
 # TODO files
 TODO.md
 
+.env

@@ -6,4 +6,9 @@ defmodule Word2Vec.Utils do
     IO.ANSI.cursor(1, 1)
     nil
   end
+
+  @spec zeros(tuple()) :: Nx.t()
+  def zeros(shape) do
+    Nx.broadcast(Nx.tensor(0, type: :f16), shape)
+  end
 end

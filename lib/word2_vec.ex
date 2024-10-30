@@ -51,22 +51,10 @@ defmodule Word2Vec do
   terms the ideas behind Mikolov and colleagues paper, negative sampling, and the overall
   optimization algorithm that needs to be used.
   """
-  alias Req
-  alias Nx
   alias Word2Vec.Utils
+  alias Word2Vec.Dataset
 
-  @billion_words_url "https://www.statmt.org/lm-benchmark/1-billion-word-language-modeling-benchmark-r13output.tar.gz"
-  @data_path "./data"
   @progress_bar_update_step 10_000
-
-  @spec download_data(Path.t() | String.t(), String.t()) :: Req.Response.t() | nil
-  def download_data(folder_path \\ @data_path, url \\ @billion_words_url) do
-    save_path = folder_path |> Path.expand() |> Path.join(Path.basename(url))
-
-    if !File.exists?(save_path) do
-      Req.get!(url, into: File.stream!(save_path))
-    end
-  end
 
   @spec normalize_text(text :: String.t()) :: String.t()
   def normalize_text(text) do
@@ -106,8 +94,8 @@ defmodule Word2Vec do
   map is the counter of the vocabulary. This function is somewhat slow
   for big files. Probably there is room for optimizing.
   """
-  @spec build_vocab(binary(), map()) :: map()
-  def build_vocab(text, vocab \\ %{}) do
+  @spec build_vocab(binary(), map(), boolean()) :: map()
+  def build_vocab(text, vocab \\ %{}, verbose \\ false) do
     words = String.split(text, ~r/[\n\t\s]/, trim: true)
     word_count = length(words)
     update_step = @progress_bar_update_step
@@ -117,7 +105,8 @@ defmodule Word2Vec do
       |> Enum.chunk_every(2, 1, :discard)
       |> Enum.with_index()
       |> Enum.reduce(vocab, fn {[word0, word1], index}, acc ->
-        if rem(index, update_step) == 0, do: ProgressBar.render(index, word_count, suffix: :count)
+        if rem(index + 1, update_step) == 0 and verbose,
+          do: ProgressBar.render(index, word_count, suffix: :count)
 
         acc
         |> Map.update(word0, 1, &(&1 + 1))
@@ -132,8 +121,10 @@ defmodule Word2Vec do
   words that should go together end up together. Apparently this is a nice
   legacy way of building up and creating phrases based on digram probabilities
   """
-  @spec word_to_phrase(String.t(), map(), non_neg_integer(), non_neg_integer()) :: [String.t()]
-  def word_to_phrase(text, vocab, min_count \\ 5, phrase_threshold \\ 100) do
+  @spec word_to_phrase(String.t(), map(), non_neg_integer(), non_neg_integer(), boolean()) :: [
+          String.t()
+        ]
+  def word_to_phrase(text, vocab, min_count \\ 5, phrase_threshold \\ 100, verbose \\ false) do
     # The idea is  to traverse this words, by chunks of 2. That is
     # [word_i, word1_i+1].
     # On each iteration we need to decide if we should write either of
@@ -149,8 +140,7 @@ defmodule Word2Vec do
 
     phrases =
       for {[word0, word1], index} <- Enum.with_index(Enum.chunk_every(words, 2, 1, :discard)) do
-        if rem(index, update_step) == 0  do
-          Utils.clear_screen()
+        if rem(index + 1, update_step) == 0 and verbose do
           ProgressBar.render(index, word_count, suffix: :count)
         end
 
@@ -163,7 +153,11 @@ defmodule Word2Vec do
 
           {w0, w1} ->
             bigram_score = score(w0, w1, vocab, min_count, word_count)
-            if bigram_score > phrase_threshold, do: "_" <> w1, else: " " <> w1
+            if bigram_score > phrase_threshold do
+              "_" <> w1
+            else
+               " " <> w1
+            end
         end
       end
 
@@ -171,36 +165,196 @@ defmodule Word2Vec do
   end
 
   @spec score(binary(), binary(), map(), float(), non_neg_integer()) :: float()
-  defp score(word0, word1, vocab, word_count, min_count) do
+  defp score(word0, word1, vocab, min_count, word_count) do
     case {Map.get(vocab, word0), Map.get(vocab, word1), Map.get(vocab, word0 <> "_" <> word1)} do
       {count0, count1, digram_count}
-      when count0 > min_count and count1 > min_count and digram_count != nil ->
+      when count0 != nil and count0 > min_count and count1 != nil and count1 > min_count and digram_count != nil ->
         (digram_count - min_count) / (count0 * count1) * word_count
       _ ->
         0.0
     end
   end
 
-  @spec build_phrases(Path.t()) :: list()
-  def build_phrases(data_path) do
-    files = File.ls!(data_path)
+  @spec build_vocab_file(Path.t(), non_neg_integer()) :: map()
+  def build_vocab_file(file_path, threads_n \\ 100, subchunks \\ 500) do
+    file_size = File.stat!(file_path).size
+    chunk_size = div(file_size, threads_n)
 
     vocab =
-      files
-      |> Enum.reduce(%{}, fn file_name, acc ->
-        text = File.read!(Path.join(@data_path, file_name))
-        text_normalized = normalize_text(text)
-        Word2Vec.build_vocab(text_normalized, acc)
-      end)
+      1..threads_n
+      |> Task.async_stream(
+        fn i ->
+          subchunk_size = div(chunk_size, subchunks)
+          file = File.open!(file_path, [:read])
+
+          vocab =
+            Enum.reduce(0..subchunks, %{}, fn j, acc ->
+              start_pos = chunk_size * (i - 1) + subchunk_size * j
+              :file.position(file, start_pos)
+
+              content =
+                case IO.read(file, subchunk_size) do
+                  :eof -> ""
+                  txt -> txt
+                end
+
+              until_line =
+                case IO.read(file, :line) do
+                  :eof -> ""
+                  txt -> txt
+                end
+
+              text = content <> until_line
+              build_vocab(text, acc)
+            end)
+          vocab
+        end,
+        timeout: 3_600_000
+      )
+      |> Enum.reduce(%{}, fn {:ok, v}, acc -> merge_vocabs(acc, v) end)
+
+    vocab
+  end
+
+  @spec build_phrases_file(Path.t(), non_neg_integer()) :: list(binary())
+  def build_phrases_file(
+        file_path,
+        vocab,
+        min_count \\ 5,
+        phrase_threshold \\ 100,
+        threads_n \\ 16,
+        subchunks \\ 64
+      ) do
+    file_size = File.stat!(file_path).size
+    chunk_size = div(file_size, threads_n)
 
     phrases =
-      files
-      |> Enum.map(fn file_name ->
-        text = File.read!(Path.join(@data_path, file_name))
-        word_to_phrase(text, vocab, 6, 50)
-      end)
-      |> List.flatten()
+      1..threads_n
+      |> Task.async_stream(
+        fn i ->
+          subchunk_size = div(chunk_size, subchunks)
+          file = File.open!(file_path, [:read])
+
+          phrases =
+            Enum.reduce(0..subchunks, [], fn j, acc ->
+              start_pos = chunk_size * (i - 1) + subchunk_size * j
+              :file.position(file, start_pos)
+
+              content =
+                case IO.read(file, subchunk_size) do
+                  :eof -> ""
+                  txt -> txt
+                end
+
+              until_line =
+                case IO.read(file, :line) do
+                  :eof -> ""
+                  txt -> txt
+                end
+
+              text = content <> until_line
+              acc ++ word_to_phrase(text, vocab, min_count, phrase_threshold)
+            end)
+
+          IO.puts("thread #{i} done!\n")
+          phrases
+        end,
+        timeout: 3_600_000
+      )
+      |> Enum.reduce([], fn {:ok, p}, acc -> acc ++ p end)
 
     phrases
   end
+
+  def merge_vocabs(vocab1, vocab2) do
+    Map.merge(vocab1, vocab2, fn _key, value1, value2 ->
+      value1 + value2
+    end)
+  end
+
+  def create_train_files(file_path) do
+    # expecting 5GB file approximately
+    file_content = File.read!(file_path)
+    vocab = build_vocab(file_content, %{}, true)
+
+    phrases = word_to_phrase(file_content, vocab, 10, 200, true)
+    data_phrase_file = File.open!(Path.join(@data_path, "data_phrases"), [:write, :utf8])
+    IO.write(data_phrase_file, Enum.join(phrases, ""))
+    :file.position(data_phrase_file, 0)
+
+    data_phrases_content = IO.read(data_phrase_file, :eof)
+    vocab2 = build_vocab(data_phrases_content, %{}, true)
+    phrases2 = word_to_phrase(data_phrases_content, vocab2, 10, 100, true)
+
+    data_phrases2_file = File.open!(Path.join(@data_path, "data_phrases2"), [:write, :utf8])
+    IO.write(data_phrases2_file, Enum.join(phrases2, ""))
+  end
+
+  def reduce_vocab(vocab, max_size) do
+    {new_vocab, _} = vocab
+    |> Enum.sort_by(fn {_word, count} -> count end, :desc)
+    |> Enum.split(max_size)
+    Enum.into(new_vocab, %{})
+  end
+
+  def train(input_file_path, embedding_size \\ 500, max_vocab_size \\ 100_000, window \\ 5, alpha \\ 0.025) do
+    data_content = File.read!(input_file_path)
+    vocab = build_vocab(data_content, %{}, true)
+
+    key = Nx.Random.key(42)
+    vocab = reduce_vocab(vocab, max_vocab_size)
+
+    k_dim = map_size(vocab)
+    {{syn0, _}, {syn1neg, _}} =
+      {Nx.Random.normal(key, shape: {k_dim, embedding_size}, type: :f16),
+       Nx.Random.normal(key, shape: {k_dim, embedding_size}, type: :f16)}
+
+    sentences = Dataset.build_sentences(data_content, 1_000)
+    sentences_n = length(sentences)
+    # train loop over sentences
+
+    1..sentences_n
+      |> Enum.map(fn i ->
+        case Dataset.word_ctx(vocab, window) do
+          :end -> nil
+          {:batch, words_ctxs} ->
+            for {word, ctx} <- words_ctxs do
+              # direct "access" to memory for addition, Idk if this is optimal
+              # but I am trying to replicate as much as possible mikotov's
+              # implementation
+              {neu1, _} = Utils.zeros({1, embedding_size})
+              {neu1error, _} = Utils.zeros({1, embedding_size})
+
+              # W^T * (sum_i x_i)/C
+              ctx_size = length(ctx)
+              neu1 = Enum.reduce(ctx, neu1, fn ctx_word_index, acc ->
+                Nx.divide(ctx_size, Nx.add(acc, syn0[ctx_word_index]))
+              end)
+
+              # f is the value at softmax, it is <hidden, syn1_{i*,j}> where
+              # i* is the index for word
+              neg_samples = Enum.map(Dataset.negative_samples(word, vocab), &({0, &1}))
+
+              neu1error = Enum.reduce([{word, 1} | Enum.map(neg_samples, &({0, &1}))], neu1error, fn {idx, label}, acc ->
+                f = Nx.dot(neu1, Nx.reshape(syn1neg[word], {embedding_size, 1}))
+                g = (label - Nx.exp(f)/(1+Nx.exp(f))) * alpha
+                inner_neu1e = Nx.add(acc, Nx.multiply(g, syn1neg[idx]))
+                learn_neg = Nx.add(syn1neg[idx], Nx.multiply(g, neu1))
+                Nx.put_slice(syn1neg, [idx, 0], Nx.reshape(learn_neg, {1, embedding_size}))
+                inner_neu1e
+              end)
+              Nx.put_slice(syn0, [word, 0], Nx.add(syn0[word], neu1error))
+            end
+          _ -> nil
+          ProgressBar.render(i, sentences_n, suffix: :count)
+        end
+      end)
+
+
+  end
+
+  def hidden(syn0, x) do
+    Nx.dot(Nx.transpose(syn0), x)
+  end
+
 end
