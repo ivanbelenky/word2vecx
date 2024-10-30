@@ -66,7 +66,10 @@ defmodule Word2Vec.Dataset do
   end
   defp find_word_boundary(<<>>, _max_length, acc), do: [acc]
 
-
-
+  # Negative samples creation
+  @spec negative_samples(non_neg_integer(), map()) :: [non_neg_integer()]
+  def negative_samples(word, vocab) do
+    nil
+  end
 
 end

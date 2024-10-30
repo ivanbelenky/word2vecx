@@ -311,8 +311,6 @@ defmodule Word2Vec do
 
     sentences = Dataset.build_sentences(data_content, 1_000)
     sentences_n = length(sentences)
-    # train loop over sentences
-
     1..sentences_n
       |> Enum.map(fn i ->
         case Dataset.word_ctx(vocab, window) do
@@ -340,10 +338,10 @@ defmodule Word2Vec do
                 g = (label - Nx.exp(f)/(1+Nx.exp(f))) * alpha
                 inner_neu1e = Nx.add(acc, Nx.multiply(g, syn1neg[idx]))
                 learn_neg = Nx.add(syn1neg[idx], Nx.multiply(g, neu1))
-                Nx.put_slice(syn1neg, [idx, 0], Nx.reshape(learn_neg, {1, embedding_size}))
+                Nx.put_slice(syn1neg, [idx, 0], Nx.reshape(learn_neg, {1, embedding_size})) # inplace
                 inner_neu1e
               end)
-              Nx.put_slice(syn0, [word, 0], Nx.add(syn0[word], neu1error))
+              Nx.put_slice(syn0, [word, 0], Nx.add(syn0[word], neu1error)) # inplace
             end
           _ -> nil
           ProgressBar.render(i, sentences_n, suffix: :count)
