@@ -71,10 +71,30 @@ defmodule Word2Vec.Dataset do
   def negative_samples(word_idx, vocab_list, n \\ 5) do
     Enum.take_random(0..n, n)
     |> Enum.filter(fn idx ->
-      {{random_word, _}, _} = List.pop_at(vocab_list, idx, "~~None~~")
-      {{word, _}, _} = List.pop_at(vocab_list, word_idx, "~~None~~")
+      {random_word, _} = Enum.at(vocab_list, idx, "~~None~~")
+      {word, _} = Enum.at(vocab_list, word_idx, "~~None~~")
       random_word != word
     end)
   end
 
+  @spec word_ctx(map(), non_neg_integer(), binary()) :: nil
+  def word_ctx(_vocab, _window, <<>>), do: :end
+
+  def word_ctx(vocab_map, window, sentence) do
+    word_list = String.split(sentence) |> Enum.filter(fn w -> vocab_map[w] != nil end)
+    n = length(word_list)
+    window = if window < n, do: window, else: n
+    words_ctxs =
+      Enum.to_list(0..n-1)
+      |> Enum.map(fn i ->
+        {start, fin} = {Kernel.max(0, i-window), Kernel.min(n-1, i+window)}
+        {
+          Enum.at(word_list, i),
+          Enum.to_list(start..fin)
+          |> Enum.filter(fn idx -> idx != i end)
+          |> Enum.map(fn j -> Enum.at(word_list, j) end)
+        }
+      end)
+    {:batch, words_ctxs}
+  end
 end

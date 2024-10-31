@@ -55,6 +55,7 @@ defmodule Word2Vec do
   alias Word2Vec.Dataset
 
   @progress_bar_update_step 10_000
+  @data_path "./data"
 
   @spec normalize_text(text :: String.t()) :: String.t()
   def normalize_text(text) do
@@ -300,51 +301,52 @@ defmodule Word2Vec do
     vocab = build_vocab(data_content, %{}, true)
 
     key = Nx.Random.key(42)
-    vocab = reduce_vocab(vocab, max_vocab_size)
+    vocab_list = reduce_vocab(vocab, max_vocab_size)
 
-    k_dim = map_size(vocab)
+    k_dim = length(vocab_list)
     {{syn0, _}, {syn1neg, _}} =
       {Nx.Random.normal(key, shape: {k_dim, embedding_size}, type: :f16),
        Nx.Random.normal(key, shape: {k_dim, embedding_size}, type: :f16)}
 
     sentences = Dataset.build_sentences(data_content, 1_000)
     sentences_n = length(sentences)
-    1..sentences_n
-      |> Enum.map(fn i ->
-        case Dataset.word_ctx(vocab, window) do
-          :end -> nil
-          {:batch, words_ctxs} ->
-            for {word, ctx} <- words_ctxs do
-              # direct "access" to memory for addition, Idk if this is optimal
-              # but I am trying to replicate as much as possible mikotov's
-              # implementation
-              {neu1, _} = Utils.zeros({1, embedding_size})
-              {neu1error, _} = Utils.zeros({1, embedding_size})
+    Enum.to_list(1..sentences_n)
+    |> Enum.map(fn i ->
+      sentence = Enum.at(sentences, i - 1)
+      case Dataset.word_ctx(Enum.into(vocab_list, %{}), window, sentence) do
+        :end -> nil
+        {:batch, words_ctxs} ->
+          for {word, ctx} <- words_ctxs do
+            # direct "access" to memory for addition, Idk if this is optimal
+            # but I am trying to replicate the non framework, hand calculated
+            # as in mikotov's implementation
+            {neu1, _} = Utils.zeros({1, embedding_size})
+            {neu1error, _} = Utils.zeros({1, embedding_size})
 
-              # W^T * (sum_i x_i)/C
-              ctx_size = length(ctx)
-              neu1 = Enum.reduce(ctx, neu1, fn ctx_word_index, acc ->
-                Nx.divide(ctx_size, Nx.add(acc, syn0[ctx_word_index]))
-              end)
+            # W^T * (sum_i x_i)/C
+            ctx_size = length(ctx)
+            neu1 = Enum.reduce(ctx, neu1, fn ctx_word_index, acc ->
+              Nx.divide(ctx_size, Nx.add(acc, syn0[ctx_word_index]))
+            end)
 
-              # f is the value at softmax, it is <hidden, syn1_{i*,j}> where
-              # i* is the index for word
-              neg_samples = Enum.map(Dataset.negative_samples(word, vocab), &({0, &1}))
+            # f is the value at softmax, it is <hidden, syn1_{i*,j}> where
+            # i* is the index for word
+            neg_samples = Enum.map(Dataset.negative_samples(word, vocab_list), &({0, &1}))
 
-              neu1error = Enum.reduce([{word, 1} | Enum.map(neg_samples, &({0, &1}))], neu1error, fn {idx, label}, acc ->
-                f = Nx.dot(neu1, Nx.reshape(syn1neg[word], {embedding_size, 1}))
-                g = (label - Nx.exp(f)/(1+Nx.exp(f))) * alpha
-                inner_neu1e = Nx.add(acc, Nx.multiply(g, syn1neg[idx]))
-                learn_neg = Nx.add(syn1neg[idx], Nx.multiply(g, neu1))
-                Nx.put_slice(syn1neg, [idx, 0], Nx.reshape(learn_neg, {1, embedding_size})) # inplace
-                inner_neu1e
-              end)
-              Nx.put_slice(syn0, [word, 0], Nx.add(syn0[word], neu1error)) # inplace
-            end
-          _ -> nil
-          ProgressBar.render(i, sentences_n, suffix: :count)
-        end
-      end)
+            neu1error = Enum.reduce([{word, 1} | Enum.map(neg_samples, &({0, &1}))], neu1error, fn {idx, label}, acc ->
+              f = Nx.dot(neu1, Nx.reshape(syn1neg[word], {embedding_size, 1}))
+              g = (label - Nx.exp(f)/(1+Nx.exp(f))) * alpha
+              inner_neu1e = Nx.add(acc, Nx.multiply(g, syn1neg[idx]))
+              learn_neg = Nx.add(syn1neg[idx], Nx.multiply(g, neu1))
+              Nx.put_slice(syn1neg, [idx, 0], Nx.reshape(learn_neg, {1, embedding_size})) # inplace
+              inner_neu1e
+            end)
+            Nx.put_slice(syn0, [word, 0], Nx.add(syn0[word], neu1error)) # inplace
+          end
+        _ -> nil
+        ProgressBar.render(i, sentences_n, suffix: :count)
+      end
+    end)
 
 
   end
