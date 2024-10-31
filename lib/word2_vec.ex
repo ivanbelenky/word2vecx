@@ -291,10 +291,8 @@ defmodule Word2Vec do
   end
 
   def reduce_vocab(vocab, max_size) do
-    {new_vocab, _} = vocab
-    |> Enum.sort_by(fn {_word, count} -> count end, :desc)
-    |> Enum.split(max_size)
-    Enum.into(new_vocab, %{})
+    {vocab, _} = vocab |> Enum.sort_by(fn {_word, count} -> count end, :desc)|> Enum.split(max_size)
+    vocab
   end
 
   def train(input_file_path, embedding_size \\ 500, max_vocab_size \\ 100_000, window \\ 5, alpha \\ 0.025) do

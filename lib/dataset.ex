@@ -67,9 +67,14 @@ defmodule Word2Vec.Dataset do
   defp find_word_boundary(<<>>, _max_length, acc), do: [acc]
 
   # Negative samples creation
-  @spec negative_samples(non_neg_integer(), map()) :: [non_neg_integer()]
-  def negative_samples(word, vocab) do
-    nil
+  @spec negative_samples(non_neg_integer(), [tuple()]) :: [non_neg_integer()]
+  def negative_samples(word_idx, vocab_list, n \\ 5) do
+    Enum.take_random(0..n, n)
+    |> Enum.filter(fn idx ->
+      {{random_word, _}, _} = List.pop_at(vocab_list, idx, "~~None~~")
+      {{word, _}, _} = List.pop_at(vocab_list, word_idx, "~~None~~")
+      random_word != word
+    end)
   end
 
 end
