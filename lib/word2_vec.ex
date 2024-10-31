@@ -314,14 +314,13 @@ defmodule Word2Vec do
     |> Enum.map(fn i ->
       sentence = Enum.at(sentences, i - 1)
       case Dataset.word_ctx(Enum.into(vocab_list, %{}), window, sentence) do
-        :end -> nil
         {:batch, words_ctxs} ->
           for {word, ctx} <- words_ctxs do
             # direct "access" to memory for addition, Idk if this is optimal
             # but I am trying to replicate the non framework, hand calculated
             # as in mikotov's implementation
-            {neu1, _} = Utils.zeros({1, embedding_size})
-            {neu1error, _} = Utils.zeros({1, embedding_size})
+            neu1 = Utils.zeros({1, embedding_size})
+            neu1error = Utils.zeros({1, embedding_size})
 
             # W^T * (sum_i x_i)/C
             ctx_size = length(ctx)
@@ -343,9 +342,11 @@ defmodule Word2Vec do
             end)
             Nx.put_slice(syn0, [word, 0], Nx.add(syn0[word], neu1error)) # inplace
           end
+          ProgressBar.render(i, sentences_n, suffix: :count)
+        :end -> nil
         _ -> nil
-        ProgressBar.render(i, sentences_n, suffix: :count)
       end
+
     end)
 
 
