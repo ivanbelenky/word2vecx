@@ -69,7 +69,7 @@ defmodule Word2Vec.Dataset do
   # Negative samples creation
   @spec negative_samples(non_neg_integer(), [tuple()]) :: [non_neg_integer()]
   def negative_samples(word_idx, vocab_list, n \\ 5) do
-    Enum.take_random(0..n, n)
+    Enum.take_random(0..length(vocab_list), n)
     |> Enum.filter(fn idx ->
       {random_word, _} = Enum.at(vocab_list, idx, "~~None~~")
       {word, _} = Enum.at(vocab_list, word_idx, "~~None~~")

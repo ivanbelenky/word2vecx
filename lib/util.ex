@@ -11,4 +11,11 @@ defmodule Word2Vec.Utils do
   def zeros(shape) do
     Nx.broadcast(Nx.tensor(0, type: :f16), shape)
   end
+
+  import Nx.Defn
+
+  defn cbow_gradient(label, f, alpha) do
+    (label - Nx.exp(f)/(1 + Nx.exp(f))) * alpha
+  end
+
 end

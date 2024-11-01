@@ -296,17 +296,23 @@ defmodule Word2Vec do
     vocab
   end
 
+
   def train(input_file_path, embedding_size \\ 500, max_vocab_size \\ 100_000, window \\ 5, alpha \\ 0.025) do
     data_content = File.read!(input_file_path)
     vocab = build_vocab(data_content, %{}, true)
 
     key = Nx.Random.key(42)
     vocab_list = reduce_vocab(vocab, max_vocab_size)
+    word_to_idx =
+      vocab_list
+      |> Enum.with_index()
+      |> Enum.map(fn {{w, _}, idx} -> {w, idx} end)
+      |> Enum.into(%{})
 
     k_dim = length(vocab_list)
     {{syn0, _}, {syn1neg, _}} =
-      {Nx.Random.normal(key, shape: {k_dim, embedding_size}, type: :f16),
-       Nx.Random.normal(key, shape: {k_dim, embedding_size}, type: :f16)}
+      {Nx.Random.normal(key, 0, 0.0125, shape: {k_dim, embedding_size}, type: :f16),
+       Nx.Random.normal(key, 0, 0.0125, shape: {k_dim, embedding_size}, type: :f16)}
 
     sentences = Dataset.build_sentences(data_content, 1_000)
     sentences_n = length(sentences)
@@ -316,6 +322,7 @@ defmodule Word2Vec do
       case Dataset.word_ctx(Enum.into(vocab_list, %{}), window, sentence) do
         {:batch, words_ctxs} ->
           for {word, ctx} <- words_ctxs do
+            word_idx = word_to_idx[word]
             # direct "access" to memory for addition, Idk if this is optimal
             # but I am trying to replicate the non framework, hand calculated
             # as in mikotov's implementation
@@ -324,20 +331,22 @@ defmodule Word2Vec do
 
             # W^T * (sum_i x_i)/C
             ctx_size = length(ctx)
-            neu1 = Enum.reduce(ctx, neu1, fn ctx_word_index, acc ->
-              Nx.divide(ctx_size, Nx.add(acc, syn0[ctx_word_index]))
+            neu1 = Enum.reduce(ctx, neu1, fn ctx_word, acc ->
+              Nx.divide(Nx.add(acc, syn0[word_to_idx[ctx_word]]), ctx_size)
             end)
 
             # f is the value at softmax, it is <hidden, syn1_{i*,j}> where
             # i* is the index for word
-            neg_samples = Enum.map(Dataset.negative_samples(word, vocab_list), &({0, &1}))
+            neg_samples = Enum.map(Dataset.negative_samples(word_idx, vocab_list), &({&1, 0}))
 
-            neu1error = Enum.reduce([{word, 1} | Enum.map(neg_samples, &({0, &1}))], neu1error, fn {idx, label}, acc ->
-              f = Nx.dot(neu1, Nx.reshape(syn1neg[word], {embedding_size, 1}))
-              g = (label - Nx.exp(f)/(1+Nx.exp(f))) * alpha
+            neu1error = Enum.reduce([{word_idx, 1.0} | neg_samples], neu1error, fn {idx, label}, acc ->
+              f = Nx.dot(neu1, Nx.reshape(syn1neg[word_idx], {embedding_size, 1}))
+              IO.inspect(label)
+              g = Utils.cbow_gradient(label, f, alpha)
               inner_neu1e = Nx.add(acc, Nx.multiply(g, syn1neg[idx]))
               learn_neg = Nx.add(syn1neg[idx], Nx.multiply(g, neu1))
               Nx.put_slice(syn1neg, [idx, 0], Nx.reshape(learn_neg, {1, embedding_size})) # inplace
+              IO.inspect(inner_neu1e)
               inner_neu1e
             end)
             Nx.put_slice(syn0, [word, 0], Nx.add(syn0[word], neu1error)) # inplace
@@ -346,10 +355,7 @@ defmodule Word2Vec do
         :end -> nil
         _ -> nil
       end
-
     end)
-
-
   end
 
   def hidden(syn0, x) do
