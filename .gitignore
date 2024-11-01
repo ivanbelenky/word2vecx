@@ -34,7 +34,9 @@ TODO.md
 
 .env
 
-**/*mikotov reference
+# Remove C files in the /Users/leculette/Documents/word2vecx/lib/mikotov reference folder
+/lib/mikotov reference/*.c
 
-data*
+
+/data*
 .DS_Store
