@@ -15,7 +15,6 @@ defmodule Word2Vec.Utils do
   import Nx.Defn
 
   defn cbow_gradient(label, f, alpha) do
-    (label - Nx.exp(f)/(1 + Nx.exp(f))) * alpha
+    (label - Nx.exp(f) / (1 + Nx.exp(f))) * alpha
   end
-
 end

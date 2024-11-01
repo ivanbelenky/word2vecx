@@ -1,5 +1,4 @@
 defmodule Word2Vec.Dataset do
-
   @billion_words_url "https://www.statmt.org/lm-benchmark/1-billion-word-language-modeling-benchmark-r13output.tar.gz"
   @data_path "./data"
 
@@ -18,13 +17,16 @@ defmodule Word2Vec.Dataset do
       [content]
     else
       {first_sentence, rest} = String.split_at(content, max_length_sentences)
+
       if String.starts_with?(rest, " ") do
         [first_sentence | build_sentences_rec_slow(rest, max_length_sentences)]
       else
         [first_rest | rest] = String.split(rest, " ")
+
         [
-          first_sentence <> first_rest |
-          build_sentences_rec_slow(Enum.join(rest, " "), max_length_sentences)]
+          first_sentence <> first_rest
+          | build_sentences_rec_slow(Enum.join(rest, " "), max_length_sentences)
+        ]
       end
     end
   end
@@ -32,20 +34,20 @@ defmodule Word2Vec.Dataset do
   @spec build_sentences_slow(binary(), non_neg_integer()) :: [String.t()]
   def build_sentences_slow(text, max_length_sentences) do
     String.split(text, "\n")
-      |> Enum.map(fn line ->
-        case String.length(line) < max_length_sentences do
-          true -> line
-          false -> build_sentences_rec_slow(line, max_length_sentences)
-        end
-      end)
-      |> List.flatten()
+    |> Enum.map(fn line ->
+      case String.length(line) < max_length_sentences do
+        true -> line
+        false -> build_sentences_rec_slow(line, max_length_sentences)
+      end
+    end)
+    |> List.flatten()
   end
-
 
   @spec build_sentences(binary(), non_neg_integer(), binary()) :: [String.t()]
   def build_sentences(content, max_length, acc \\ "")
 
   def build_sentences(<<>>, _max_length, acc), do: [acc]
+
   def build_sentences(<<char::utf8, rest::binary>>, max_length, acc) do
     cond do
       byte_size(acc) >= max_length ->
@@ -53,6 +55,7 @@ defmodule Word2Vec.Dataset do
           ?\s -> [acc | build_sentences(rest, max_length, "")]
           _ -> find_word_boundary(rest, max_length, acc <> <<char::utf8>>)
         end
+
       true ->
         build_sentences(rest, max_length, acc <> <<char::utf8>>)
     end
@@ -61,9 +64,11 @@ defmodule Word2Vec.Dataset do
   defp find_word_boundary(<<?\s, rest::binary>>, max_length, acc) do
     [acc | build_sentences(rest, max_length, "")]
   end
+
   defp find_word_boundary(<<char::utf8, rest::binary>>, max_length, acc) do
     find_word_boundary(rest, max_length, acc <> <<char::utf8>>)
   end
+
   defp find_word_boundary(<<>>, _max_length, acc), do: [acc]
 
   # Negative samples creation
@@ -77,24 +82,43 @@ defmodule Word2Vec.Dataset do
     end)
   end
 
-  @spec word_ctx(map(), non_neg_integer(), binary()) :: {:batch, [{binary(), [binary()]}]}
+  @spec word_ctx(map(), non_neg_integer(), binary()) :: [{binary(), [binary()]}]
   def word_ctx(_vocab, _window, <<>>), do: :end
 
   def word_ctx(vocab_map, window, sentence) do
     word_list = String.split(sentence) |> Enum.filter(fn w -> vocab_map[w] != nil end)
     n = length(word_list)
     window = if window < n, do: window, else: n
-    words_ctxs =
-      Enum.to_list(0..n-1)
-      |> Enum.map(fn i ->
-        {start, fin} = {Kernel.max(0, i-window), Kernel.min(n-1, i+window)}
-        {
-          Enum.at(word_list, i),
-          Enum.to_list(start..fin)
-          |> Enum.filter(fn idx -> idx != i end)
-          |> Enum.map(fn j -> Enum.at(word_list, j) end)
-        }
-      end)
-    {:batch, words_ctxs}
+
+    Enum.to_list(0..(n - 1))
+    |> Enum.map(fn i ->
+      {start, fin} = {Kernel.max(0, i - window), Kernel.min(n - 1, i + window)}
+
+      {
+        Enum.at(word_list, i),
+        Enum.to_list(start..fin)
+        |> Enum.filter(fn idx -> idx != i end)
+        |> Enum.map(fn j -> Enum.at(word_list, j) end)
+      }
+    end)
+  end
+
+  @type label :: 0 | 1
+
+  @spec build_dataset(
+          binary(),
+          [{binary(), non_neg_integer()}],
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: [{binary(), label()}]
+  def build_dataset(data_content, vocab_list, max_sentences_size, window) do
+    sentences = build_sentences(data_content, max_sentences_size)
+    sentences_n = length(sentences)
+
+    Enum.to_list(1..sentences_n)
+    |> Enum.map(fn i ->
+      sentence = Enum.at(sentences, i - 1)
+      word_ctx(Enum.into(vocab_list, %{}), window, sentence)
+    end)
   end
 end
