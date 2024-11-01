@@ -77,7 +77,7 @@ defmodule Word2Vec.Dataset do
     end)
   end
 
-  @spec word_ctx(map(), non_neg_integer(), binary()) :: nil
+  @spec word_ctx(map(), non_neg_integer(), binary()) :: {:batch, [{binary(), [binary()]}]}
   def word_ctx(_vocab, _window, <<>>), do: :end
 
   def word_ctx(vocab_map, window, sentence) do
